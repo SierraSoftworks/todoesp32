@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use controls::Control;
 use embedded_graphics::prelude::*;
 use epd_waveshare::prelude::*;
 use esp_idf_svc::hal::*;
@@ -124,7 +125,9 @@ fn run() -> anyhow::Result<()> {
             Ok(t) => {
                 log::info!("Got {} tasks from Todoist", t.len());
                 tasks.set_tasks(t);
-                header.set_last_update(format!("Updated at {}", chrono::Local::now().format("%H:%M")), OctColor::Green);
+                if tasks.is_dirty() {
+                    header.set_last_update(format!("Updated at {}", chrono::Local::now().format("%H:%M")), OctColor::Green);
+                }
             }
             Err(e) => {
                 log::error!("Failed to get tasks from Todoist: {:?}", e);

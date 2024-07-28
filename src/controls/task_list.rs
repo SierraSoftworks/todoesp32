@@ -12,6 +12,7 @@ use super::Control;
 pub struct TaskList {
     bounding_box: Rectangle,
     tasks: Vec<Task>,
+    count: usize,
     dirty: bool,
 }
 
@@ -20,15 +21,19 @@ impl TaskList {
         Self {
             bounding_box,
             dirty: true,
+            count: 0,
             tasks: vec![],
         }
     }
 
     pub fn set_tasks(&mut self, mut tasks: Vec<Task>) -> &mut Self {
+        let count = tasks.len();
         tasks.sort();
-        self.dirty = self.dirty || self.tasks.len() != tasks.len() || self.tasks.iter().zip(tasks.iter()).any(|(a, b)| a != b);
+        tasks.truncate(12);
+        self.dirty = self.dirty || self.count != count || self.tasks.len() != tasks.len() || self.tasks.iter().zip(tasks.iter()).any(|(a, b)| a != b);
 
         self.tasks = tasks;
+        self.count = count;
         self
     }
 }
@@ -55,6 +60,7 @@ impl Control for TaskList {
         const INFO_FONT_HEIGHT: i32 = 9;
         let info_font = FontRenderer::new::<u8g2_fonts::fonts::u8g2_font_unifont_tf>();
         
+        let mut remaining = self.count;
         for (i, task) in self.tasks.iter().enumerate() {
             let task_box = Rectangle::new(
                 margin_box.anchor_point(AnchorPoint::TopLeft) + Point::new(0, i as i32 * TASK_HEIGHT as i32),
@@ -65,6 +71,8 @@ impl Control for TaskList {
             if task_box.anchor_point(AnchorPoint::BottomRight).y > margin_box.anchor_point(AnchorPoint::BottomRight).y {
                 break;
             }
+
+            remaining -= 1;
 
             // Draw the task timeline marker
             Circle::new(
@@ -129,6 +137,18 @@ impl Control for TaskList {
                     display,
                 ).map_err(|_| anyhow!("Unable to render task duration"))?;
             }
+        }
+
+        if remaining > 0 {
+            // Draw "+ N more tasks..." message
+            info_font.render_aligned(
+                format_args!("+ {} more...", remaining),
+                margin_box.anchor_point(AnchorPoint::BottomCenter) + Point::new(0, -5),
+                u8g2_fonts::types::VerticalPosition::Bottom,
+                u8g2_fonts::types::HorizontalAlignment::Center,
+                u8g2_fonts::types::FontColor::Transparent(OctColor::Black),
+                display,
+            ).map_err(|_| anyhow!("Unable to render more tasks message"))?;
         }
 
         Ok(())
