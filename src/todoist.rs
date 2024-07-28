@@ -189,13 +189,13 @@ impl Display for TaskDue {
             .as_deref()
             .and_then(|dt| chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S").map(|(v, _)| v).ok())
             .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc).with_timezone(&chrono::Local)) {
-            match datetime.date_naive().cmp(&now.date_naive()) {
+            match datetime.naive_local().date().cmp(&now.naive_local().date()) {
                 Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
                 Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
                 Ordering::Greater => write!(f, "todo"),
             }
         } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
-            match date.cmp(&now.date_naive()) {
+            match date.cmp(&now.naive_local().date()) {
                 Ordering::Less => write!(f, "{}", date.format("%d/%m")),
                 Ordering::Equal => write!(f, "today"),
                 Ordering::Greater => write!(f, "todo"),

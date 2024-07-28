@@ -108,7 +108,7 @@ fn run() -> anyhow::Result<()> {
 
     loop {
         let is_online = wifi.is_connected()?;
-        header.set_date(chrono::Local::now().date_naive());
+        header.set_date(chrono::Local::now().naive_local().date());
 
         if !is_online {
             header.set_last_update("Offline".to_string(), OctColor::Red);
