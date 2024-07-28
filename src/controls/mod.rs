@@ -3,7 +3,7 @@ pub mod popup;
 pub mod task_list;
 
 pub use header::Header;
-pub use task_list::TaskList;
+pub use task_list::{TaskList, TaskSnapshot};
 
 use crate::display::DisplayBuffer;
 

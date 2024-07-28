@@ -1,12 +1,12 @@
-use chrono::{Local, Utc};
+use std::{cmp::Ordering, fmt::Display};
+
+use chrono::NaiveDate;
 use embedded_svc::*;
 use epd_waveshare::color::OctColor;
 use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
 use http::Headers;
 
 use crate::markdown;
-
-
 
 pub struct TodoistClient {
     api_key: &'static str,
@@ -18,7 +18,7 @@ impl TodoistClient {
         Ok(Self { api_key, filter })
     }
 
-    pub fn get_tasks(&self) -> anyhow::Result<Vec<crate::controls::task_list::Task>> {
+    pub fn get_tasks(&self) -> anyhow::Result<Vec<Task>> {
         ::log::info!("Making GET request to Todoist API (/v2/tasks)");
 
         let config = &HttpConfiguration {
@@ -43,11 +43,10 @@ impl TodoistClient {
                 ::log::info!("Got HTTP {} from Todoist API", response.status());
                 ::log::debug!("{}", std::str::from_utf8(&buffer[..body_size]).unwrap());
 
-                let tasks: Vec<Task> = serde_json::from_slice(&buffer[..body_size])?;
+                let mut tasks: Vec<Task> = serde_json::from_slice(&buffer[..body_size])?;
+                tasks.sort();
 
-                response.release();
-
-                Ok(tasks.into_iter().map(|t| t.into()).collect())
+                Ok(tasks)
             }
             status => {
                 ::log::error!("Unexpected status code from Todoist API: HTTP {}", status);
@@ -58,7 +57,8 @@ impl TodoistClient {
 }
 
 #[derive(serde::Deserialize, Debug)]
-struct Task {
+pub struct Task {
+    id: String,
     priority: u8,
     order: u32,
     content: String,
@@ -68,67 +68,166 @@ struct Task {
     duration: Option<TaskDuration>,
 }
 
-#[derive(serde::Deserialize, Debug)]
-struct TaskDue {
+impl Eq for Task {}
+
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Ord for Task {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.due.as_ref(), other.due.as_ref()) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+            .then_with(|| self.priority.cmp(&other.priority).reverse())
+            .then_with(|| self.order.cmp(&other.order))
+    }
+}
+
+impl PartialOrd for Task {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<crate::controls::TaskSnapshot> for Task {
+    fn into(self) -> crate::controls::TaskSnapshot {
+        let duration: Option<chrono::Duration> = self.duration.as_ref().map(|d| d.into());
+
+        crate::controls::TaskSnapshot {
+            title: markdown::strip(&self.content, 80).to_string(),
+            description: if self.description.is_empty() {
+                None
+            } else {
+                Some(markdown::strip(self.description.trim().lines().next().unwrap_or_default(), 120).to_string())
+            },
+            when: match self.due.as_ref() {
+                Some(due) => due.to_string(),
+                None => "todo".to_string(),
+            },
+            when_color: if self.due.as_ref().map(|d| d.is_past(duration)).unwrap_or_default() {
+                OctColor::Red
+            } else {
+                OctColor::Black
+            },
+            duration: self.duration.map(|d| d.to_string()),
+            marker_color: if self.is_completed {
+                OctColor::Green
+            } else {
+                match self.priority {
+                    1 => OctColor::White,
+                    2 => OctColor::Blue,
+                    3 => OctColor::Orange,
+                    4 => OctColor::Red,
+                    _ => OctColor::Black,
+                }
+            },
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+pub struct TaskDue {
     date: String,
     datetime: Option<String>,
 }
 
+impl TaskDue {
+    pub fn is_past(&self, duration: Option<chrono::Duration>) -> bool {
+        let now = chrono::Local::now();
+
+        if let Some(datetime) = self.datetime
+            .as_deref()
+            .and_then(|dt| chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S").map(|(v, _)| v).ok()) {
+            datetime + duration.unwrap_or_default() < now.naive_utc()
+        } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
+            date < now.date_naive()
+        } else {
+            false
+        }
+    }
+}
+
+impl Ord for TaskDue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.datetime.as_deref(), other.datetime.as_deref()) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            _ => Ordering::Equal,
+        }
+            .then_with(|| self.date.cmp(&other.date))
+    }
+}
+
+impl PartialOrd for TaskDue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl TryInto<chrono::NaiveDate> for &TaskDue {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<chrono::NaiveDate, Self::Error> {
+        NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").map_err(|_| anyhow::anyhow!("Invalid date format '{}'", self.date))
+    }
+}
+
+impl Display for TaskDue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let now = chrono::Local::now();
+
+        if let Some(datetime) = self.datetime
+            .as_deref()
+            .and_then(|dt| chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S").map(|(v, _)| v).ok()) {
+            match datetime.date().cmp(&now.date_naive()) {
+                Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
+                Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
+                Ordering::Greater => write!(f, "todo"),
+            }
+        } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
+            match date.cmp(&now.date_naive()) {
+                Ordering::Less => write!(f, "{}", date.format("%d/%m")),
+                Ordering::Equal => write!(f, "today"),
+                Ordering::Greater => write!(f, "todo"),
+            }
+        } else {
+            write!(f, "todo")
+        }
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
-struct TaskDuration {
+pub struct TaskDuration {
     amount: u32,
     unit: String,
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<crate::controls::task_list::Task> for Task {
-    fn into(self) -> crate::controls::task_list::Task {
-        crate::controls::task_list::Task {
-            title: markdown::strip(&self.content, 100).to_string(),
-            description: markdown::strip(self.description.trim().lines().next().unwrap_or_default(), 200).to_string(),
-            priority: 4 - self.priority,
-            order: self.order,
-            color: match self.priority {
-                1 => OctColor::White,
-                2 => OctColor::Blue,
-                3 => OctColor::Orange,
-                4 => OctColor::Red,
-                _ => OctColor::Black,
-            },
-            when: self.due.map(|d| d.into()).unwrap_or_default(),
-            completed: self.is_completed,
-            duration: self.duration.map(|d| d.into()),
-        }
-    }
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<crate::controls::task_list::TaskSchedule> for TaskDue {
-    fn into(self) -> crate::controls::task_list::TaskSchedule {
-        if let Some(datetime) = self.datetime {
-            match chrono::NaiveDateTime::parse_and_remainder(&datetime, "%Y-%m-%dT%H:%M:%S") {
-                Ok((dt, _)) => return crate::controls::task_list::TaskSchedule::Time(dt.and_local_timezone(Utc).single().map(|d| d.with_timezone(&Local).naive_local()).unwrap_or(dt)),
-                Err(e) => {
-                    ::log::warn!("Failed to parse datetime '{}' from Todoist API: {}", &datetime, e);
-                },
-            }
-        }
-
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
-            crate::controls::task_list::TaskSchedule::Date(d)
-        } else {
-            crate::controls::task_list::TaskSchedule::None
-        }
-    }
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<chrono::Duration> for TaskDuration {
-    fn into(self) -> chrono::Duration {
+impl Into<chrono::TimeDelta> for &TaskDuration {
+    fn into(self) -> chrono::TimeDelta {
         match self.unit.as_str() {
-            "minute" => chrono::Duration::minutes(self.amount as i64),
-            "day" => chrono::Duration::days(self.amount as i64),
-            _ => chrono::Duration::zero(),
+            "minute" => chrono::TimeDelta::minutes(self.amount as i64),
+            "day" => chrono::TimeDelta::days(self.amount as i64),
+            _ => chrono::TimeDelta::zero(),
         }
+    }
+}
+
+impl Display for TaskDuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.amount, match self.unit.as_str() {
+            "minute" => "m",
+            "day" => "d",
+            unit => unit,
+        })
     }
 }
