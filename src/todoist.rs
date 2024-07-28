@@ -60,7 +60,7 @@ impl TodoistClient {
 pub struct Task {
     id: String,
     priority: u8,
-    order: u32,
+    order: i32,
     content: String,
     description: String,
     due: Option<TaskDue>,
