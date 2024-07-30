@@ -110,6 +110,7 @@ fn run() -> anyhow::Result<()> {
     ));
 
     tasks.set_tasks(intro::get_setup_tasks(wifi.is_connected().unwrap_or(false)));
+    let mut last_update = chrono::Local::now();
 
     loop {
         let is_online = wifi.is_connected()?;
@@ -128,11 +129,13 @@ fn run() -> anyhow::Result<()> {
                 log::info!("Got {} tasks from Todoist", t.len());
                 tasks.set_tasks(t);
                 if tasks.is_dirty() {
-                    header.set_last_update(
-                        format!("Updated at {}", chrono::Local::now().format("%H:%M")),
-                        OctColor::Green,
-                    );
+                    last_update = chrono::Local::now();
                 }
+
+                header.set_last_update(
+                    format!("Updated at {}", last_update.format("%H:%M")),
+                    OctColor::Green,
+                );
             }
             Err(e) => {
                 log::error!("Failed to get tasks from Todoist: {:?}", e);
