@@ -25,16 +25,20 @@ impl TodoistClient {
             crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
             ..Default::default()
         };
-        
+
         let mut client = http::client::Client::wrap(EspHttpConnection::new(config)?);
 
-        let url = format!("https://api.todoist.com/rest/v2/tasks?filter={}", self.filter).replace(" ", "%20");
+        let url = format!(
+            "https://api.todoist.com/rest/v2/tasks?filter={}",
+            self.filter
+        )
+        .replace(" ", "%20");
 
         let auth_header = format!("Bearer {}", self.api_key);
-        let headers = [
-            ("authorization", auth_header.as_str()),
-        ];
-        let mut response = client.request(http::Method::Get, &url, &headers)?.submit()?;
+        let headers = [("authorization", auth_header.as_str())];
+        let mut response = client
+            .request(http::Method::Get, &url, &headers)?
+            .submit()?;
 
         match response.status() {
             200 => {
@@ -84,8 +88,8 @@ impl Ord for Task {
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         }
-            .then_with(|| self.priority.cmp(&other.priority).reverse())
-            .then_with(|| self.order.cmp(&other.order))
+        .then_with(|| self.priority.cmp(&other.priority).reverse())
+        .then_with(|| self.order.cmp(&other.order))
     }
 }
 
@@ -105,13 +109,24 @@ impl Into<crate::controls::TaskSnapshot> for Task {
             description: if self.description.is_empty() {
                 None
             } else {
-                Some(markdown::strip(self.description.trim().lines().next().unwrap_or_default(), 120).to_string())
+                Some(
+                    markdown::strip(
+                        self.description.trim().lines().next().unwrap_or_default(),
+                        120,
+                    )
+                    .to_string(),
+                )
             },
             when: match self.due.as_ref() {
                 Some(due) => due.to_string(),
                 None => "todo".to_string(),
             },
-            when_color: if self.due.as_ref().map(|d| d.is_past(duration)).unwrap_or_default() {
+            when_color: if self
+                .due
+                .as_ref()
+                .map(|d| d.is_past(duration))
+                .unwrap_or_default()
+            {
                 OctColor::Red
             } else {
                 OctColor::Black
@@ -142,9 +157,11 @@ impl TaskDue {
     pub fn is_past(&self, duration: Option<chrono::Duration>) -> bool {
         let now = chrono::Local::now();
 
-        if let Some(datetime) = self.datetime
-            .as_deref()
-            .and_then(|dt| chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S").map(|(v, _)| v).ok()) {
+        if let Some(datetime) = self.datetime.as_deref().and_then(|dt| {
+            chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S")
+                .map(|(v, _)| v)
+                .ok()
+        }) {
             datetime + duration.unwrap_or_default() < now.naive_utc()
         } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
             date < now.date_naive()
@@ -162,7 +179,7 @@ impl Ord for TaskDue {
             (None, Some(_)) => Ordering::Greater,
             _ => Ordering::Equal,
         }
-            .then_with(|| self.date.cmp(&other.date))
+        .then_with(|| self.date.cmp(&other.date))
     }
 }
 
@@ -177,7 +194,8 @@ impl TryInto<chrono::NaiveDate> for &TaskDue {
     type Error = anyhow::Error;
 
     fn try_into(self) -> Result<chrono::NaiveDate, Self::Error> {
-        NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").map_err(|_| anyhow::anyhow!("Invalid date format '{}'", self.date))
+        NaiveDate::parse_from_str(&self.date, "%Y-%m-%d")
+            .map_err(|_| anyhow::anyhow!("Invalid date format '{}'", self.date))
     }
 }
 
@@ -185,10 +203,19 @@ impl Display for TaskDue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let now = chrono::Local::now();
 
-        if let Some(datetime) = self.datetime
+        if let Some(datetime) = self
+            .datetime
             .as_deref()
-            .and_then(|dt| chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S").map(|(v, _)| v).ok())
-            .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc).with_timezone(&chrono::Local)) {
+            .and_then(|dt| {
+                chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S")
+                    .map(|(v, _)| v)
+                    .ok()
+            })
+            .map(|dt| {
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
+                    .with_timezone(&chrono::Local)
+            })
+        {
             match datetime.naive_local().date().cmp(&now.naive_local().date()) {
                 Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
                 Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
@@ -225,10 +252,15 @@ impl Into<chrono::TimeDelta> for &TaskDuration {
 
 impl Display for TaskDuration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.amount, match self.unit.as_str() {
-            "minute" => "m",
-            "day" => "d",
-            unit => unit,
-        })
+        write!(
+            f,
+            "{}{}",
+            self.amount,
+            match self.unit.as_str() {
+                "minute" => "m",
+                "day" => "d",
+                unit => unit,
+            }
+        )
     }
 }

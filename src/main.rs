@@ -2,8 +2,8 @@ use anyhow::anyhow;
 use controls::Control;
 use embedded_graphics::prelude::*;
 use epd_waveshare::prelude::*;
-use esp_idf_svc::hal::*;
 use esp_idf_svc::hal::prelude::*;
+use esp_idf_svc::hal::*;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
@@ -63,7 +63,7 @@ fn run() -> anyhow::Result<()> {
         peripherals.pins.gpio4.downgrade_input(),
         delay::FreeRtos,
     )?;
-    
+
     log::info!("Display configured");
 
     log::debug!("Configuring WiFi modem");
@@ -97,12 +97,14 @@ fn run() -> anyhow::Result<()> {
         std::thread::sleep(std::time::Duration::from_secs(5));
     }
     log::info!("System time synchronized");
-    
+
     let todoist = todoist::TodoistClient::new(config::TODOIST_API_KEY, config::TODOIST_FILTER)?;
 
     let mut header = controls::Header::new();
-    let mut tasks = controls::TaskList::new(
-        display.bounding_box().resized(Size::new(display.width() as u32, display.height() as u32 - 30), embedded_graphics::geometry::AnchorPoint::BottomLeft));
+    let mut tasks = controls::TaskList::new(display.bounding_box().resized(
+        Size::new(display.width() as u32, display.height() as u32 - 30),
+        embedded_graphics::geometry::AnchorPoint::BottomLeft,
+    ));
 
     tasks.set_tasks(intro::get_setup_tasks(wifi.is_connected().unwrap_or(false)));
 
@@ -112,10 +114,7 @@ fn run() -> anyhow::Result<()> {
 
         if !is_online {
             header.set_last_update("Offline".to_string(), OctColor::Red);
-            display.render_controls_if_dirty(OctColor::White, &mut [
-                &mut header,
-                &mut tasks,
-            ])?;
+            display.render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])?;
 
             std::thread::sleep(std::time::Duration::from_secs(30));
             continue;
@@ -126,7 +125,10 @@ fn run() -> anyhow::Result<()> {
                 log::info!("Got {} tasks from Todoist", t.len());
                 tasks.set_tasks(t);
                 if tasks.is_dirty() {
-                    header.set_last_update(format!("Updated at {}", chrono::Local::now().format("%H:%M")), OctColor::Green);
+                    header.set_last_update(
+                        format!("Updated at {}", chrono::Local::now().format("%H:%M")),
+                        OctColor::Green,
+                    );
                 }
             }
             Err(e) => {
@@ -134,11 +136,8 @@ fn run() -> anyhow::Result<()> {
                 header.set_last_update(e.to_string(), OctColor::Red);
             }
         }
-        
-        display.render_controls_if_dirty(OctColor::White, &mut [
-            &mut header,
-            &mut tasks,
-        ])?;
+
+        display.render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])?;
 
         std::thread::sleep(std::time::Duration::from_secs(300));
     }

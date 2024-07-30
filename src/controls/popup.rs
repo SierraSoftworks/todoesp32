@@ -9,7 +9,7 @@ use super::Control;
 pub struct Popup {
     pub title: &'static str,
     pub message: &'static str,
-    
+
     pub title_color: OctColor,
     pub message_color: OctColor,
 
@@ -57,35 +57,37 @@ impl Control for Popup {
     fn render(&self, display: &mut DisplayBuffer) -> anyhow::Result<()> {
         let title_font = FontRenderer::new::<fonts::u8g2_font_inb27_mf>();
 
-        title_font.render_aligned(
-            self.title,
-            display.bounding_box().center() + Point::new(0, -20),
-            VerticalPosition::Baseline,
-            HorizontalAlignment::Center,
-            FontColor::Transparent(self.title_color),
-            display,
-        ).map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
+        title_font
+            .render_aligned(
+                self.title,
+                display.bounding_box().center() + Point::new(0, -20),
+                VerticalPosition::Baseline,
+                HorizontalAlignment::Center,
+                FontColor::Transparent(self.title_color),
+                display,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
 
         let message_font = FontRenderer::new::<fonts::u8g2_font_inb16_mf>();
-        message_font.render_aligned(
-            self.message,
-            display.bounding_box().center() + Point::new(0, 20),
-            VerticalPosition::Top,
-            HorizontalAlignment::Center,
-            FontColor::Transparent(self.message_color),
-            display
-        ).map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
-        
+        message_font
+            .render_aligned(
+                self.message,
+                display.bounding_box().center() + Point::new(0, 20),
+                VerticalPosition::Top,
+                HorizontalAlignment::Center,
+                FontColor::Transparent(self.message_color),
+                display,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
+
         Ok(())
     }
-    
+
     fn is_dirty(&self) -> bool {
         self.dirty
     }
-    
+
     fn clear_dirty(&mut self) {
         self.dirty = false;
     }
-
-    
 }

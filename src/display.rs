@@ -1,11 +1,11 @@
 use std::ptr::addr_of_mut;
 
 use embedded_graphics::prelude::*;
+use epd_waveshare::epd5in65f::*;
 use epd_waveshare::graphics::*;
 use epd_waveshare::prelude::*;
-use epd_waveshare::epd5in65f::*;
-use esp_idf_svc::hal::*;
 use esp_idf_svc::hal::prelude::*;
+use esp_idf_svc::hal::*;
 
 use crate::controls::Control;
 
@@ -21,7 +21,8 @@ pub type EPDisplay<D> = Epd5in65f<
 >;
 
 pub type DisplayType = DisplayBuffer;
-static mut BUFFER: [u8; WIDTH as usize * HEIGHT as usize / 2] = [0; WIDTH as usize * HEIGHT as usize / 2];
+static mut BUFFER: [u8; WIDTH as usize * HEIGHT as usize / 2] =
+    [0; WIDTH as usize * HEIGHT as usize / 2];
 
 pub struct Display<D: embedded_hal::blocking::delay::DelayMs<u8>> {
     driver: DisplayDriver,
@@ -49,9 +50,13 @@ impl<D: embedded_hal::blocking::delay::DelayMs<u8>> Display<D> {
             Option::<gpio::AnyIOPin>::None,
             Option::<gpio::AnyOutputPin>::None,
             &spi::SpiDriverConfig::new().dma(spi::Dma::Disabled),
-            &spi::SpiConfig::new().baudrate(2.MHz().into()).write_only(true).bit_order(spi::config::BitOrder::MsbFirst).data_mode(spi::config::MODE_0),
+            &spi::SpiConfig::new()
+                .baudrate(2.MHz().into())
+                .write_only(true)
+                .bit_order(spi::config::BitOrder::MsbFirst)
+                .data_mode(spi::config::MODE_0),
         )?;
-    
+
         log::info!("Configuring EPD driver");
         let mut epd = EPDisplay::new(
             &mut display_driver,
@@ -63,10 +68,10 @@ impl<D: embedded_hal::blocking::delay::DelayMs<u8>> Display<D> {
         )?;
 
         epd.set_background_color(OctColor::Black);
-    
+
         log::info!("Creating display buffer");
         let display = DisplayBuffer::new();
-        
+
         Ok(Self {
             driver: display_driver,
             epd,
@@ -81,12 +86,20 @@ impl<D: embedded_hal::blocking::delay::DelayMs<u8>> Display<D> {
     {
         render(&mut self.display)?;
         self.epd.wake_up(&mut self.driver, &mut self.delay)?;
-        self.epd.update_and_display_frame(&mut self.driver, self.display.buffer(), &mut self.delay)?;
+        self.epd.update_and_display_frame(
+            &mut self.driver,
+            self.display.buffer(),
+            &mut self.delay,
+        )?;
         self.epd.sleep(&mut self.driver, &mut self.delay)?;
         Ok(())
     }
 
-    pub fn render_controls_if_dirty(&mut self, background: OctColor, controls: &mut [&mut dyn Control]) -> anyhow::Result<()> {
+    pub fn render_controls_if_dirty(
+        &mut self,
+        background: OctColor,
+        controls: &mut [&mut dyn Control],
+    ) -> anyhow::Result<()> {
         if !controls.iter().any(|c| c.is_dirty()) {
             return Ok(());
         }
@@ -104,7 +117,7 @@ impl<D: embedded_hal::blocking::delay::DelayMs<u8>> Display<D> {
         for control in controls.iter_mut() {
             control.clear_dirty();
         }
-        
+
         Ok(())
     }
 
@@ -176,15 +189,15 @@ impl OctDisplay for DisplayBuffer {
     fn buffer(&self) -> &[u8] {
         self.buffer
     }
-    
+
     fn get_mut_buffer(&mut self) -> &mut [u8] {
         self.buffer
     }
-    
+
     fn set_rotation(&mut self, rotation: DisplayRotation) {
         self.rotation = rotation
     }
-    
+
     fn rotation(&self) -> DisplayRotation {
         self.rotation
     }
@@ -199,10 +212,11 @@ impl OctDisplay for DisplayBuffer {
 impl DrawTarget for DisplayBuffer {
     type Color = OctColor;
     type Error = core::convert::Infallible;
-    
+
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Pixel<Self::Color>> {
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
         for pixel in pixels {
             if let Some((x, y)) = self.effective_position(pixel.0.x, pixel.0.y) {
                 let lower = x & 0x01 != 0;
@@ -211,7 +225,7 @@ impl DrawTarget for DisplayBuffer {
                 let color = pixel.1.get_nibble() << (if lower { 0 } else { 4 });
                 let mask = 0x0f << (if lower { 4 } else { 0 });
 
-               self.buffer[idx] = (self.buffer[idx] & mask) | color;
+                self.buffer[idx] = (self.buffer[idx] & mask) | color;
             }
         }
         Ok(())
