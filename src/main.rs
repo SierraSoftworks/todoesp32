@@ -90,6 +90,9 @@ fn run() -> anyhow::Result<()> {
 
     log::info!("Connected to WiFi network");
 
+    log::debug!("Setting up system timezone");
+    std::env::set_var("TZ", config::TIMEZONE_SPEC);
+
     log::debug!("Configuring system time");
     let ntp = sntp::EspSntp::new_default()?;
     while !matches!(ntp.get_sync_status(), sntp::SyncStatus::Completed) {

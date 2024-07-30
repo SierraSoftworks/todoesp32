@@ -151,6 +151,7 @@ impl Into<crate::controls::TaskSnapshot> for Task {
 pub struct TaskDue {
     date: String,
     datetime: Option<String>,
+    timezone: Option<String>,
 }
 
 impl TaskDue {
@@ -158,9 +159,14 @@ impl TaskDue {
         let now = chrono::Local::now();
 
         if let Some(datetime) = self.datetime.as_deref().and_then(|dt| {
-            chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S")
-                .map(|(v, _)| v)
-                .ok()
+            if dt.ends_with('Z') {
+                chrono::DateTime::<chrono::FixedOffset>::parse_from_rfc3339(dt)
+                    .map(|dt| dt.with_timezone(&chrono::Local).naive_local())
+                    .ok()
+            } else {
+                chrono::NaiveDateTime::parse_from_str(dt, "%Y-%m-%dT%H:%M:%S")
+                    .ok()
+            }
         }) {
             datetime + duration.unwrap_or_default() < now.naive_utc()
         } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
