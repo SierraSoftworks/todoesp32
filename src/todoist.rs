@@ -158,21 +158,16 @@ impl TaskDue {
     pub fn is_past(&self, duration: Option<chrono::Duration>) -> bool {
         let now = chrono::Local::now();
 
-        if let Some(datetime) = self.datetime.as_deref().and_then(|dt| {
-            if dt.ends_with('Z') {
-                chrono::DateTime::<chrono::FixedOffset>::parse_from_rfc3339(dt)
-                    .map(|dt| dt.with_timezone(&chrono::Local).naive_local())
-                    .ok()
-            } else {
-                chrono::NaiveDateTime::parse_from_str(dt, "%Y-%m-%dT%H:%M:%S")
-                    .ok()
+        match self.try_into() {
+            Ok(dt@chrono::DateTime::<chrono::Local>{..}) => dt + duration.unwrap_or_default() < now,
+            Err(_) => {
+                match self.try_into() {
+                    Ok(date@chrono::NaiveDate{..}) => date < now.date_naive(),
+                    Err(_) => {
+                        false
+                    }
+                }
             }
-        }) {
-            datetime + duration.unwrap_or_default() < now.naive_utc()
-        } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
-            date < now.date_naive()
-        } else {
-            false
         }
     }
 }
@@ -195,6 +190,27 @@ impl PartialOrd for TaskDue {
     }
 }
 
+impl TryInto<chrono::DateTime<chrono::Local>> for &TaskDue {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<chrono::DateTime<chrono::Local>, Self::Error> {
+        if let Some(dt) = self.datetime.as_deref() {
+            if dt.ends_with('Z') {
+                chrono::DateTime::<chrono::FixedOffset>::parse_from_rfc3339(dt)
+                    .map(|dt| dt.with_timezone(&chrono::Local))
+                    .map_err(|e| anyhow::anyhow!("Invalid datetime format '{dt}': {e}"))
+            } else {
+                chrono::NaiveDateTime::parse_from_str(dt, "%Y-%m-%dT%H:%M:%S")
+                    .map_err(|e| anyhow::anyhow!("Invalid datetime format '{}': {:?}", dt, e))
+                    .and_then(|dt| dt.and_local_timezone(chrono::Local).single().ok_or_else(|| anyhow::anyhow!("Cannot set timezone to local")))
+                    .map_err(|e| anyhow::anyhow!("Invalid datetime format '{dt}': {e}"))
+            }
+        } else {
+            Err(anyhow::anyhow!("No datetime field"))
+        }
+    }
+}
+
 #[allow(clippy::from_over_into)]
 impl TryInto<chrono::NaiveDate> for &TaskDue {
     type Error = anyhow::Error;
@@ -209,32 +225,28 @@ impl Display for TaskDue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let now = chrono::Local::now();
 
-        if let Some(datetime) = self
-            .datetime
-            .as_deref()
-            .and_then(|dt| {
-                chrono::NaiveDateTime::parse_and_remainder(dt, "%Y-%m-%dT%H:%M:%S")
-                    .map(|(v, _)| v)
-                    .ok()
-            })
-            .map(|dt| {
-                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
-                    .with_timezone(&chrono::Local)
-            })
-        {
-            match datetime.naive_local().date().cmp(&now.naive_local().date()) {
-                Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
-                Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
-                Ordering::Greater => write!(f, "todo"),
+        match self.try_into() {
+            Ok(datetime@chrono::DateTime::<chrono::Local>{..}) => {
+                match datetime.naive_local().date().cmp(&now.naive_local().date()) {
+                    Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
+                    Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
+                    Ordering::Greater => write!(f, "todo"),
+                }
+            },
+            Err(_e) => {
+                match self.try_into() {
+                    Ok(date@chrono::NaiveDate{..}) => {
+                        match date.cmp(&now.naive_local().date()) {
+                            Ordering::Less => write!(f, "{}", date.format("%d/%m")),
+                            Ordering::Equal => write!(f, "today"),
+                            Ordering::Greater => write!(f, "todo"),
+                        }
+                    },
+                    Err(_) => {
+                        write!(f, "todo")
+                    }
+                }
             }
-        } else if let Ok(date) = chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d") {
-            match date.cmp(&now.naive_local().date()) {
-                Ordering::Less => write!(f, "{}", date.format("%d/%m")),
-                Ordering::Equal => write!(f, "today"),
-                Ordering::Greater => write!(f, "todo"),
-            }
-        } else {
-            write!(f, "todo")
         }
     }
 }
