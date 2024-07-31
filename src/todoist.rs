@@ -104,6 +104,11 @@ impl Into<crate::controls::TaskSnapshot> for Task {
     fn into(self) -> crate::controls::TaskSnapshot {
         let duration: Option<chrono::Duration> = self.duration.as_ref().map(|d| d.into());
 
+        let state = self
+            .due
+            .map(|due| due.state(duration))
+            .unwrap_or(TaskDueState::Unknown);
+
         crate::controls::TaskSnapshot {
             title: markdown::strip(&self.content, 80).to_string(),
             description: if self.description.is_empty() {
@@ -117,19 +122,11 @@ impl Into<crate::controls::TaskSnapshot> for Task {
                     .to_string(),
                 )
             },
-            when: match self.due.as_ref() {
-                Some(due) => due.to_string(),
-                None => "todo".to_string(),
-            },
-            when_color: if self
-                .due
-                .as_ref()
-                .map(|d| d.is_past(duration))
-                .unwrap_or_default()
-            {
-                OctColor::Red
-            } else {
-                OctColor::Black
+            when: format!("{}", &state),
+            when_color: match state {
+                TaskDueState::NowTime => OctColor::Green,
+                TaskDueState::PastDate(..) | TaskDueState::PastTime(..) => OctColor::Red,
+                _ => OctColor::Black,
             },
             duration: self.duration.map(|d| d.to_string()),
             marker_color: if self.is_completed {
@@ -155,16 +152,28 @@ pub struct TaskDue {
 }
 
 impl TaskDue {
-    pub fn is_past(&self, duration: Option<chrono::Duration>) -> bool {
+    pub fn state(&self, duration: Option<chrono::Duration>) -> TaskDueState {
         let now = chrono::Local::now();
 
         match self.try_into() {
+            Ok(dt @ chrono::DateTime::<chrono::Local> { .. })
+                if dt + duration.unwrap_or_default() < now =>
+            {
+                TaskDueState::PastTime(dt.naive_local())
+            }
+            Ok(dt @ chrono::DateTime::<chrono::Local> { .. }) if dt < now => TaskDueState::NowTime,
             Ok(dt @ chrono::DateTime::<chrono::Local> { .. }) => {
-                dt + duration.unwrap_or_default() < now
+                TaskDueState::FutureTime(dt.naive_local())
             }
             Err(_) => match self.try_into() {
-                Ok(date @ chrono::NaiveDate { .. }) => date < now.date_naive(),
-                Err(_) => false,
+                Ok(date @ chrono::NaiveDate { .. }) if date < now.date_naive() => {
+                    TaskDueState::PastDate(date)
+                }
+                Ok(date @ chrono::NaiveDate { .. }) if date == now.date_naive() => {
+                    TaskDueState::NowDate
+                }
+                Ok(date @ chrono::NaiveDate { .. }) => TaskDueState::FutureDate(date),
+                Err(_) => TaskDueState::Unknown,
             },
         }
     }
@@ -223,28 +232,34 @@ impl TryInto<chrono::NaiveDate> for &TaskDue {
     }
 }
 
-impl Display for TaskDue {
+pub enum TaskDueState {
+    Unknown,
+    PastDate(chrono::NaiveDate),
+    NowDate,
+    FutureDate(chrono::NaiveDate),
+    PastTime(chrono::NaiveDateTime),
+    NowTime,
+    FutureTime(chrono::NaiveDateTime),
+}
+
+impl Display for TaskDueState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let now = chrono::Local::now();
 
-        match self.try_into() {
-            Ok(datetime @ chrono::DateTime::<chrono::Local> { .. }) => {
-                match datetime.naive_local().date().cmp(&now.naive_local().date()) {
-                    Ordering::Less => write!(f, "{}", datetime.format("%d/%m")),
-                    Ordering::Equal => write!(f, "{}", datetime.format("%H:%M")),
-                    Ordering::Greater => write!(f, "todo"),
-                }
+        match self {
+            Self::Unknown => write!(f, "todo"),
+            Self::PastDate(date) => write!(f, "{}", date.format("%d/%m")),
+            Self::NowDate => write!(f, "today"),
+            Self::FutureDate(date) => write!(f, "{}", date.format("%d/%m")),
+            Self::PastTime(datetime) if datetime.date() == now.naive_local().date() => {
+                write!(f, "{}", datetime.format("%H:%M"))
             }
-            Err(_e) => match self.try_into() {
-                Ok(date @ chrono::NaiveDate { .. }) => match date.cmp(&now.naive_local().date()) {
-                    Ordering::Less => write!(f, "{}", date.format("%d/%m")),
-                    Ordering::Equal => write!(f, "today"),
-                    Ordering::Greater => write!(f, "todo"),
-                },
-                Err(_) => {
-                    write!(f, "todo")
-                }
-            },
+            Self::PastTime(datetime) => write!(f, "{}", datetime.format("%d/%m")),
+            Self::NowTime => write!(f, "now"),
+            Self::FutureTime(datetime) if datetime.date() == now.naive_local().date() => {
+                write!(f, "{}", datetime.format("%H:%M"))
+            }
+            Self::FutureTime(datetime) => write!(f, "{}", datetime.format("%d/%m")),
         }
     }
 }
