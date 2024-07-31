@@ -121,6 +121,9 @@ fn run() -> anyhow::Result<()> {
             display.render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])?;
 
             std::thread::sleep(std::time::Duration::from_secs(30));
+
+            wifi.connect()?;
+
             continue;
         }
 
