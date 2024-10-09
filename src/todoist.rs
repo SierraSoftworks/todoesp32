@@ -42,7 +42,8 @@ impl TodoistClient {
 
         match response.status() {
             200 => {
-                let mut buffer = vec![0; response.content_len().unwrap_or(16 * 1024) as usize];
+                let mut buffer: Vec<u8> =
+                    Vec::try_with_capacity(response.content_len().unwrap_or(16 * 1024) as usize)?;
                 let body_size = response.read(&mut buffer)?;
                 ::log::info!("Got HTTP {} from Todoist API", response.status());
                 ::log::debug!("{}", std::str::from_utf8(&buffer[..body_size]).unwrap());

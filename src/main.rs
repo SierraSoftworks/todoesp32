@@ -1,3 +1,5 @@
+#![feature(try_with_capacity)]
+
 use anyhow::anyhow;
 use controls::Control;
 use embedded_graphics::prelude::*;
