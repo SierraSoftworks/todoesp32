@@ -16,6 +16,7 @@ pub struct Popup {
     dirty: bool,
 }
 
+#[allow(dead_code)]
 impl Popup {
     pub fn new(title: &'static str, message: &'static str) -> Self {
         Self {

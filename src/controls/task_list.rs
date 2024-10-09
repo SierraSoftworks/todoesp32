@@ -27,6 +27,7 @@ pub struct TaskSnapshot {
     pub duration: Option<String>,
 }
 
+#[allow(dead_code)]
 impl TaskList {
     pub fn new(bounding_box: Rectangle) -> Self {
         Self {

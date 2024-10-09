@@ -13,6 +13,7 @@ pub struct Header {
     dirty: bool,
 }
 
+#[allow(dead_code)]
 impl Header {
     pub fn new() -> Self {
         Self {
