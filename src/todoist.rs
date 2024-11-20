@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use embedded_svc::*;
 use epd_waveshare::color::OctColor;
 use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
-use http::Headers;
+use io::{Error, ErrorType};
 
 use crate::markdown;
 
@@ -36,18 +36,14 @@ impl TodoistClient {
 
         let auth_header = format!("Bearer {}", self.api_key);
         let headers = [("authorization", auth_header.as_str())];
-        let mut response = client
+        let response = client
             .request(http::Method::Get, &url, &headers)?
             .submit()?;
 
         match response.status() {
             200 => {
-                let mut buffer = vec![0; response.content_len().unwrap_or(16 * 1024) as usize];
-                let body_size = response.read(&mut buffer)?;
                 ::log::info!("Got HTTP {} from Todoist API", response.status());
-                ::log::debug!("{}", std::str::from_utf8(&buffer[..body_size]).unwrap());
-
-                let mut tasks: Vec<Task> = serde_json::from_slice(&buffer[..body_size])?;
+                let mut tasks: Vec<Task> = serde_json::from_reader(ResponseReader { response })?;
                 tasks.sort();
 
                 Ok(tasks)
@@ -57,6 +53,44 @@ impl TodoistClient {
                 Err(anyhow::anyhow!("HTTP {}", status))
             }
         }
+    }
+}
+
+struct ResponseReader<C> {
+    response: http::client::Response<C>,
+}
+
+impl<C: ErrorType> ErrorType for ResponseReader<C> {
+    type Error = C::Error;
+}
+
+impl<C: http::client::Connection + ErrorType> std::io::Read for ResponseReader<C> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.response.read(buf).map_err(|e| {
+            std::io::Error::new(
+                match e.kind() {
+                    io::ErrorKind::AddrInUse => std::io::ErrorKind::AddrInUse,
+                    io::ErrorKind::AddrNotAvailable => std::io::ErrorKind::AddrNotAvailable,
+                    io::ErrorKind::AlreadyExists => std::io::ErrorKind::AlreadyExists,
+                    io::ErrorKind::BrokenPipe => std::io::ErrorKind::BrokenPipe,
+                    io::ErrorKind::ConnectionAborted => std::io::ErrorKind::ConnectionAborted,
+                    io::ErrorKind::ConnectionRefused => std::io::ErrorKind::ConnectionRefused,
+                    io::ErrorKind::ConnectionReset => std::io::ErrorKind::ConnectionReset,
+                    io::ErrorKind::Interrupted => std::io::ErrorKind::Interrupted,
+                    io::ErrorKind::InvalidData => std::io::ErrorKind::InvalidData,
+                    io::ErrorKind::InvalidInput => std::io::ErrorKind::InvalidInput,
+                    io::ErrorKind::NotConnected => std::io::ErrorKind::NotConnected,
+                    io::ErrorKind::NotFound => std::io::ErrorKind::NotFound,
+                    io::ErrorKind::OutOfMemory => std::io::ErrorKind::OutOfMemory,
+                    io::ErrorKind::PermissionDenied => std::io::ErrorKind::PermissionDenied,
+                    io::ErrorKind::TimedOut => std::io::ErrorKind::TimedOut,
+                    io::ErrorKind::Unsupported => std::io::ErrorKind::Unsupported,
+                    io::ErrorKind::WriteZero => std::io::ErrorKind::WriteZero,
+                    _ => std::io::ErrorKind::Other,
+                },
+                format!("{:?}", e),
+            )
+        })
     }
 }
 

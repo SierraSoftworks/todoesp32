@@ -108,6 +108,10 @@ fn run() -> anyhow::Result<()> {
         Size::new(display.width() as u32, display.height() as u32 - 30),
         embedded_graphics::geometry::AnchorPoint::BottomLeft,
     ));
+    let mut popup = controls::Popup::new(
+        "Loading Error",
+        "Check that your API key is correct.".into(),
+    );
 
     tasks.set_tasks(intro::get_setup_tasks(wifi.is_connected().unwrap_or(false)));
     let mut last_update = chrono::Local::now();
@@ -142,7 +146,11 @@ fn run() -> anyhow::Result<()> {
             }
             Err(e) => {
                 log::error!("Failed to get tasks from Todoist: {:?}", e);
-                header.set_last_update(e.to_string(), OctColor::Red);
+                header.set_last_update("Fetch Failed".to_string(), OctColor::Red);
+                popup.set_message(format!("{:?}", e));
+
+                display
+                    .render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut popup])?;
             }
         }
 

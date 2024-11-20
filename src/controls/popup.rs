@@ -8,7 +8,7 @@ use super::Control;
 
 pub struct Popup {
     pub title: &'static str,
-    pub message: &'static str,
+    pub message: String,
 
     pub title_color: OctColor,
     pub message_color: OctColor,
@@ -18,7 +18,7 @@ pub struct Popup {
 
 #[allow(dead_code)]
 impl Popup {
-    pub fn new(title: &'static str, message: &'static str) -> Self {
+    pub fn new(title: &'static str, message: String) -> Self {
         Self {
             title,
             message,
@@ -35,7 +35,7 @@ impl Popup {
         self
     }
 
-    pub fn set_message(&mut self, message: &'static str) -> &mut Self {
+    pub fn set_message(&mut self, message: String) -> &mut Self {
         self.dirty = self.dirty || self.message != message;
         self.message = message;
         self
@@ -72,7 +72,7 @@ impl Control for Popup {
         let message_font = FontRenderer::new::<fonts::u8g2_font_inb16_mf>();
         message_font
             .render_aligned(
-                self.message,
+                self.message.as_str(),
                 display.bounding_box().center() + Point::new(0, 20),
                 VerticalPosition::Top,
                 HorizontalAlignment::Center,
