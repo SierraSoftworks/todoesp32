@@ -1,15 +1,17 @@
 use anyhow::anyhow;
+use config::HOSTNAME;
 use controls::Control;
 use embedded_graphics::prelude::*;
 use epd_waveshare::prelude::*;
 use esp_idf_svc::hal::prelude::*;
-use esp_idf_svc::hal::*;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
+    ipv4, netif,
     nvs::EspDefaultNvsPartition,
     sntp,
     wifi::{BlockingWifi, ClientConfiguration, Configuration, EspWifi},
 };
+use esp_idf_svc::{hal::*, wifi};
 use gpio::InputPin;
 use gpio::OutputPin;
 
@@ -68,8 +70,25 @@ fn run() -> anyhow::Result<()> {
 
     log::debug!("Configuring WiFi modem");
 
+    let net_if = netif::EspNetif::new_with_conf(&netif::NetifConfiguration {
+        ip_configuration: ipv4::Configuration::Client(ipv4::ClientConfiguration::DHCP(
+            ipv4::DHCPClientSettings {
+                hostname: Some(
+                    HOSTNAME
+                        .try_into()
+                        .map_err(|e| anyhow!("Failed to load hostname: {:?}", e))?,
+                ),
+            },
+        )),
+        ..netif::NetifConfiguration::wifi_default_client()
+    })?;
+
     let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
+        EspWifi::wrap_all(
+            wifi::WifiDriver::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
+            net_if,
+            netif::EspNetif::new(netif::NetifStack::Ap)?,
+        )?,
         sys_loop,
     )?;
 
@@ -80,6 +99,7 @@ fn run() -> anyhow::Result<()> {
         password: config::WIFI_PASSWORD
             .try_into()
             .map_err(|e| anyhow!("Failed to load WiFi Password: {:?}.", e))?,
+        pmf_cfg: wifi::PmfConfiguration::new_pmf_optional(),
         ..Default::default()
     }))?;
     wifi.start()?;
