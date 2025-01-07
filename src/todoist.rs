@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Display};
+use std::{cmp::Ordering, fmt::Display, io::BufReader};
 
 use chrono::NaiveDate;
 use embedded_svc::*;
@@ -43,7 +43,8 @@ impl TodoistClient {
         match response.status() {
             200 => {
                 ::log::info!("Got HTTP {} from Todoist API", response.status());
-                let mut tasks: Vec<Task> = serde_json::from_reader(ResponseReader { response })?;
+                let mut tasks: Vec<Task> =
+                    serde_json::from_reader(BufReader::new(ResponseReader { response }))?;
                 tasks.sort();
 
                 Ok(tasks)

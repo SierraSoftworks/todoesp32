@@ -14,12 +14,14 @@ use esp_idf_svc::{
 use esp_idf_svc::{hal::*, wifi};
 use gpio::InputPin;
 use gpio::OutputPin;
+use retry::retry;
 
 mod config;
 mod controls;
 mod display;
 mod intro;
 mod markdown;
+mod retry;
 mod todoist;
 
 fn main() -> anyhow::Result<()> {
@@ -151,7 +153,7 @@ fn run() -> anyhow::Result<()> {
             continue;
         }
 
-        match todoist.get_tasks() {
+        match retry(|| todoist.get_tasks(), 3) {
             Ok(t) => {
                 log::info!("Got {} tasks from Todoist", t.len());
                 tasks.set_tasks(t);
