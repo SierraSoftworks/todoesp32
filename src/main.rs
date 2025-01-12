@@ -166,9 +166,12 @@ fn run() -> anyhow::Result<()> {
                     OctColor::Green,
                 );
             }
+            Err(_) if chrono::Local::now() - last_update < chrono::Duration::hours(1) => {
+                log::info!("Failed to get tasks from Todoist, but not retrying yet");
+            }
             Err(e) => {
                 log::error!("Failed to get tasks from Todoist: {:?}", e);
-                header.set_last_update("Fetch Failed".to_string(), OctColor::Red);
+                header.set_last_update("Update failing consistently".to_string(), OctColor::Red);
                 popup.set_message(format!("{:?}", e));
 
                 display
