@@ -3,6 +3,8 @@ use config::HOSTNAME;
 use controls::Control;
 use embedded_graphics::prelude::*;
 use epd_waveshare::prelude::*;
+use esp_idf_hal::reset::restart;
+use esp_idf_hal::sys::{esp, esp_light_sleep_start, esp_sleep_enable_timer_wakeup};
 use esp_idf_svc::hal::prelude::*;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -45,7 +47,7 @@ fn main() -> anyhow::Result<()> {
         }
         Err(err) => {
             log::error!("System exited with error: {:?}", err);
-            Err(err)
+            restart();
         }
     }
 }
@@ -181,6 +183,9 @@ fn run() -> anyhow::Result<()> {
 
         display.render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])?;
 
-        std::thread::sleep(std::time::Duration::from_secs(300));
+        unsafe {
+            esp!(esp_sleep_enable_timer_wakeup(300 * 1_000_000))?;
+            esp!(esp_light_sleep_start())?;
+        }
     }
 }
