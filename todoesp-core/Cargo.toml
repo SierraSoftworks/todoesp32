@@ -1,0 +1,18 @@
+[package]
+name = "todoesp-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "Portable, host-testable application logic for the TodoESP firmware (Markdown stripping, Todoist task model/parsing/sorting, due-date handling and display snapshots)."
+license = "MIT"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+hifijson = { version = "0.5", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+# `epd2in13_v3` is part of epd-waveshare's defaults; the always-compiled
+# `epd2in13_v2` module references constants gated behind it, so it must stay
+# enabled even though this project only uses the 5.65" (F) panel.
+epd-waveshare = { version = "0.6", default-features = false, features = ["graphics", "epd2in13_v3"] }

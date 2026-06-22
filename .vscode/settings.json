@@ -1,0 +1,24 @@
+{
+  // The firmware is the primary Rust crate in this repo and targets the Xtensa
+  // ESP32, so rust-analyzer is configured for that toolchain/target. The
+  // portable `todoesp-core` crate is also `no_std`-compatible and analyses
+  // cleanly under the same target.
+  "rust-analyzer.cargo.target": "xtensa-esp32-none-elf",
+  "rust-analyzer.cargo.allTargets": false,
+  // The language server itself runs under stable; cargo/check invocations use
+  // the `esp` toolchain (xtensa support). This also sidesteps any global
+  // toolchain override (e.g. from mise/rustup) for analysis.
+  "rust-analyzer.server.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "stable"
+  },
+  "rust-analyzer.cargo.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "esp"
+  },
+  "rust-analyzer.check.extraEnv": {
+    "RUSTUP_TOOLCHAIN": "esp"
+  },
+  "rust-analyzer.linkedProjects": [
+    "todoesp-core/Cargo.toml",
+    "firmware/Cargo.toml"
+  ]
+}

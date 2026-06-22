@@ -1,30 +1,20 @@
-use anyhow::anyhow;
+//! The scrollable list of upcoming tasks drawn as a timeline.
+
+use alloc::vec::Vec;
 
 use embedded_graphics::{geometry::*, primitives::*};
 use epd_waveshare::color::OctColor;
+use todoesp_core::TaskSnapshot;
 use u8g2_fonts::FontRenderer;
 
-use crate::display::DisplayBuffer;
-
 use super::Control;
+use crate::display::DisplayBuffer;
 
 pub struct TaskList {
     bounding_box: Rectangle,
     tasks: Vec<TaskSnapshot>,
     count: usize,
     dirty: bool,
-}
-
-#[derive(PartialEq)]
-pub struct TaskSnapshot {
-    pub marker_color: OctColor,
-
-    pub title: String,
-    pub description: Option<String>,
-
-    pub when: String,
-    pub when_color: OctColor,
-    pub duration: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -34,32 +24,27 @@ impl TaskList {
             bounding_box,
             dirty: true,
             count: 0,
-            tasks: vec![],
+            tasks: Vec::new(),
         }
     }
 
-    pub fn set_tasks<I, T>(&mut self, tasks: T) -> &mut Self
+    pub fn set_tasks<T>(&mut self, tasks: T) -> &mut Self
     where
-        T: IntoIterator<Item = I>,
-        I: Into<TaskSnapshot>,
+        T: IntoIterator<Item = TaskSnapshot>,
     {
         let mut count = 0;
         let mut new_tasks: Vec<TaskSnapshot> = Vec::with_capacity(12);
         for task in tasks {
             count += 1;
             if new_tasks.len() < 12 {
-                new_tasks.push(task.into());
+                new_tasks.push(task);
             }
         }
 
         self.dirty = self.dirty
             || self.count != count
             || self.tasks.len() != new_tasks.len()
-            || self
-                .tasks
-                .iter()
-                .zip(new_tasks.iter())
-                .any(|(a, b)| !a.eq(b));
+            || self.tasks.iter().zip(new_tasks.iter()).any(|(a, b)| a != b);
 
         self.tasks = new_tasks;
         self.count = count;
@@ -68,7 +53,7 @@ impl TaskList {
 }
 
 impl Control for TaskList {
-    fn render(&self, display: &mut DisplayBuffer) -> anyhow::Result<()> {
+    fn render(&self, display: &mut DisplayBuffer<'_>) {
         // Draw the calendar plumb-line
         Line::new(
             self.bounding_box.top_left + Point::new(55, 0),
@@ -80,7 +65,8 @@ impl Control for TaskList {
                 .stroke_color(OctColor::Black)
                 .build(),
             display,
-        )?;
+        )
+        .ok();
 
         let margin_box = self.bounding_box.resized(
             Size::new(
@@ -128,7 +114,8 @@ impl Control for TaskList {
                     .stroke_color(OctColor::Black)
                     .build(),
                 display,
-            )?;
+            )
+            .ok();
 
             // Draw the task title
             title_font
@@ -141,7 +128,7 @@ impl Control for TaskList {
                     u8g2_fonts::types::FontColor::Transparent(OctColor::Black),
                     display,
                 )
-                .map_err(|_| anyhow!("Unable to render task title"))?;
+                .ok();
 
             // Render the additional information text
             if let Some(description) = task.description.as_deref() {
@@ -155,13 +142,13 @@ impl Control for TaskList {
                         u8g2_fonts::types::FontColor::Transparent(OctColor::Blue),
                         display,
                     )
-                    .map_err(|_| anyhow!("Unable to render additional information text"))?;
+                    .ok();
             }
 
             // Draw the "when" marker (done/todo/past/time)
             info_font
                 .render_aligned(
-                    format_args!("{}", task.when),
+                    task.when.as_str(),
                     task_box.anchor_point(AnchorPoint::TopLeft)
                         + Point::new(
                             50 - CIRCLE_DIAMETER / 2 - 5,
@@ -172,10 +159,10 @@ impl Control for TaskList {
                     u8g2_fonts::types::FontColor::Transparent(task.when_color),
                     display,
                 )
-                .map_err(|_| anyhow!("Unable to render task time"))?;
+                .ok();
 
             if let Some(duration) = task.duration.as_deref() {
-                FontRenderer::new::<u8g2_fonts::fonts::u8g2_font_unifont_tf>()
+                info_font
                     .render_aligned(
                         duration,
                         task_box.anchor_point(AnchorPoint::TopLeft)
@@ -185,7 +172,7 @@ impl Control for TaskList {
                         u8g2_fonts::types::FontColor::Transparent(OctColor::Blue),
                         display,
                     )
-                    .map_err(|_| anyhow!("Unable to render task duration"))?;
+                    .ok();
             }
         }
 
@@ -200,10 +187,8 @@ impl Control for TaskList {
                     u8g2_fonts::types::FontColor::Transparent(OctColor::Black),
                     display,
                 )
-                .map_err(|_| anyhow!("Unable to render more tasks message"))?;
+                .ok();
         }
-
-        Ok(())
     }
 
     fn is_dirty(&self) -> bool {

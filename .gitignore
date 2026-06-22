@@ -1,5 +1,9 @@
-/.vscode
-/.embuild
-/target
+target/
+.direnv/
+.embuild/
+.DS_Store
+
+# The root virtual workspace builds the portable `todoesp-core` library, so its
+# lockfile is not committed. The `firmware/` binary crate keeps its own
+# committed `Cargo.lock` for reproducible device builds.
 /Cargo.lock
-/.direnv

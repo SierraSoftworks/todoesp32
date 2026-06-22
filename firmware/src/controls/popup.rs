@@ -1,10 +1,13 @@
+//! A centred, full-screen status/error message.
+
+use alloc::string::String;
+
 use embedded_graphics::prelude::*;
 use epd_waveshare::color::OctColor;
-use u8g2_fonts::{fonts, types::*, FontRenderer};
-
-use crate::display::DisplayBuffer;
+use u8g2_fonts::{FontRenderer, fonts, types::*};
 
 use super::Control;
+use crate::display::DisplayBuffer;
 
 pub struct Popup {
     pub title: &'static str,
@@ -24,7 +27,6 @@ impl Popup {
             message,
             title_color: OctColor::Black,
             message_color: OctColor::Black,
-
             dirty: true,
         }
     }
@@ -55,10 +57,8 @@ impl Popup {
 }
 
 impl Control for Popup {
-    fn render(&self, display: &mut DisplayBuffer) -> anyhow::Result<()> {
-        let title_font = FontRenderer::new::<fonts::u8g2_font_inb27_mf>();
-
-        title_font
+    fn render(&self, display: &mut DisplayBuffer<'_>) {
+        FontRenderer::new::<fonts::u8g2_font_inb27_mf>()
             .render_aligned(
                 self.title,
                 display.bounding_box().center() + Point::new(0, -20),
@@ -67,10 +67,9 @@ impl Control for Popup {
                 FontColor::Transparent(self.title_color),
                 display,
             )
-            .map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
+            .ok();
 
-        let message_font = FontRenderer::new::<fonts::u8g2_font_inb16_mf>();
-        message_font
+        FontRenderer::new::<fonts::u8g2_font_inb16_mf>()
             .render_aligned(
                 self.message.as_str(),
                 display.bounding_box().center() + Point::new(0, 20),
@@ -79,9 +78,7 @@ impl Control for Popup {
                 FontColor::Transparent(self.message_color),
                 display,
             )
-            .map_err(|e| anyhow::anyhow!("Failed to render message text: {}", e))?;
-
-        Ok(())
+            .ok();
     }
 
     fn is_dirty(&self) -> bool {

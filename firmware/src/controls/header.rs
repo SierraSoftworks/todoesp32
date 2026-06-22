@@ -1,10 +1,15 @@
-use embedded_graphics::{prelude::*, primitives::*};
-use epd_waveshare::color::OctColor;
-use u8g2_fonts::{fonts, types, *};
+//! The title bar showing the current date and last-update status.
 
-use crate::display::DisplayBuffer;
+use alloc::string::String;
+
+use embedded_graphics::geometry::AnchorPoint;
+use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::{Line, PrimitiveStyle};
+use epd_waveshare::color::OctColor;
+use u8g2_fonts::{FontRenderer, fonts, types};
 
 use super::Control;
+use crate::display::DisplayBuffer;
 
 pub struct Header {
     date: Option<chrono::NaiveDate>,
@@ -32,11 +37,7 @@ impl Header {
 
     pub fn set_last_update(&mut self, message: String, color: OctColor) -> &mut Self {
         self.dirty = self.dirty
-            || !self
-                .last_update
-                .as_ref()
-                .map(|u| u == &message)
-                .unwrap_or_default()
+            || self.last_update.as_ref() != Some(&message)
             || self.last_update_color != color;
         self.last_update = Some(message);
         self.last_update_color = color;
@@ -44,60 +45,62 @@ impl Header {
     }
 }
 
+impl Default for Header {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Control for Header {
-    fn render(&self, display: &mut DisplayBuffer) -> anyhow::Result<()> {
-        let header_box = display.bounding_box().resized(
-            Size::new(display.width() as u32, 30),
-            embedded_graphics::geometry::AnchorPoint::TopLeft,
-        );
+    fn render(&self, display: &mut DisplayBuffer<'_>) {
+        let header_box = display
+            .bounding_box()
+            .resized(Size::new(display.width() as u32, 30), AnchorPoint::TopLeft);
 
         Line::new(
-            header_box.anchor_point(embedded_graphics::geometry::AnchorPoint::BottomLeft),
-            header_box.anchor_point(embedded_graphics::geometry::AnchorPoint::BottomRight),
+            header_box.anchor_point(AnchorPoint::BottomLeft),
+            header_box.anchor_point(AnchorPoint::BottomRight),
         )
         .into_styled(PrimitiveStyle::with_stroke(OctColor::Black, 1))
-        .draw(display)?;
+        .draw(display)
+        .ok();
 
         FontRenderer::new::<fonts::u8g2_font_helvB14_te>()
             .render_aligned(
                 "Todoist",
-                header_box.anchor_point(embedded_graphics::geometry::AnchorPoint::CenterLeft)
-                    + Point::new(10, 0),
+                header_box.anchor_point(AnchorPoint::CenterLeft) + Point::new(10, 0),
                 types::VerticalPosition::Center,
                 types::HorizontalAlignment::Left,
                 types::FontColor::Transparent(OctColor::Red),
                 display,
             )
-            .map_err(|_| anyhow::anyhow!("Unable to render title text"))?;
+            .ok();
 
         if let Some(time) = self.date {
             FontRenderer::new::<fonts::u8g2_font_helvB14_te>()
                 .render_aligned(
                     format_args!("{}", time.format("%a %e %B")),
-                    header_box.center() + Point::new(0, 0),
+                    header_box.center(),
                     types::VerticalPosition::Center,
                     types::HorizontalAlignment::Center,
                     types::FontColor::Transparent(OctColor::Black),
                     display,
                 )
-                .map_err(|_| anyhow::anyhow!("Unable to render time text"))?;
+                .ok();
         }
 
         if let Some(last_update) = self.last_update.as_ref() {
             FontRenderer::new::<fonts::u8g2_font_unifont_tf>()
                 .render_aligned(
                     last_update.as_str(),
-                    header_box.anchor_point(embedded_graphics::geometry::AnchorPoint::CenterRight)
-                        + Point::new(-10, 0),
+                    header_box.anchor_point(AnchorPoint::CenterRight) + Point::new(-10, 0),
                     types::VerticalPosition::Center,
                     types::HorizontalAlignment::Right,
                     types::FontColor::Transparent(self.last_update_color),
                     display,
                 )
-                .map_err(|_| anyhow::anyhow!("Unable to render last update text"))?;
+                .ok();
         }
-
-        Ok(())
     }
 
     fn is_dirty(&self) -> bool {

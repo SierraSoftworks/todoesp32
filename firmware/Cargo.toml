@@ -1,0 +1,130 @@
+[package]
+edition      = "2024"
+name         = "todoesp32-firmware"
+rust-version = "1.88"
+version      = "0.1.0"
+
+[[bin]]
+name = "todoesp32"
+path = "./src/bin/main.rs"
+# Unit tests run on the host in the `todoesp-core` crate; the firmware bin/lib have
+# no harness so `cargo test` only builds the on-device integration tests below.
+test = false
+
+[lib]
+test = false
+
+[[test]]
+# On-device smoke tests (run with probe-rs + a JTAG probe). See tests/integration.rs.
+name    = "integration"
+harness = false
+
+[dependencies]
+# Portable, host-testable application core (task model, parsing, rendering data).
+todoesp-core = { path = "../todoesp-core" }
+
+# --- esp-hal core stack (matches esp-generate baseline) ---
+esp-hal = { version = "~1.1.0", features = ["esp32", "log-04", "unstable"] }
+
+esp-rtos = { version = "0.3.0", features = [
+  "embassy",
+  "esp-alloc",
+  "esp-radio",
+  "esp32",
+  "log-04",
+] }
+
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32", "log-04"] }
+log                    = "0.4.27"
+
+esp-alloc = "0.10.0"
+esp-backtrace = { version = "0.19.0", features = [
+  "custom-halt",
+  "esp32",
+  "panic-handler",
+  "println",
+] }
+esp-println = { version = "0.17.0", features = ["esp32", "log-04"] }
+esp-radio = { version = "0.18.0", features = [
+  "esp-alloc",
+  "esp32",
+  "log-04",
+  "unstable",
+  "wifi",
+] }
+
+# --- Embassy async runtime + networking ---
+embassy-executor = { version = "0.10.0", features = ["log"] }
+embassy-time     = { version = "0.5.0", features = ["log"] }
+embassy-net = { version = "0.9.1", features = [
+  "dhcpv4",
+  "dns",
+  "log",
+  "medium-ethernet",
+  "tcp",
+  "udp",
+] }
+embedded-io       = "0.7.1"
+embedded-io-async = "0.7.0"
+smoltcp = { version = "0.13.0", default-features = false, features = [
+  "log",
+  "medium-ethernet",
+  "multicast",
+  "proto-dhcpv4",
+  "proto-dns",
+  "proto-ipv4",
+  "socket-dns",
+  "socket-icmp",
+  "socket-raw",
+  "socket-tcp",
+  "socket-udp",
+] }
+
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+heapless         = "0.8"
+
+# --- HTTPS client + JSON + time ---
+reqwless = { version = "0.14", default-features = false, features = [
+  "embedded-tls",
+  "alloc",
+  "log",
+] }
+# embedded-tls 0.18 depends on the `der = 0.8.0-rc.x` pre-release line; cargo would
+# otherwise greedily resolve the stable `der 0.8.0`, which changed APIs and breaks
+# the build. Pin der + der_derive to the exact RCs embedded-tls 0.18.0 was built
+# against (see its published Cargo.lock). Remove once embedded-tls targets stable der.
+der        = "=0.8.0-rc.10"
+der_derive = "=0.8.0-rc.6"
+chrono     = { version = "0.4", default-features = false, features = ["alloc"] }
+
+# --- E-paper display + graphics ---
+epd-waveshare = { version = "0.6", default-features = false, features = [
+  "graphics",
+  "epd2in13_v3",
+] }
+embedded-graphics = "0.8"
+embedded-hal-bus  = "0.3"
+u8g2-fonts        = "0.5"
+
+# On-device test harness. Runs via `probe-rs` over JTAG (classic ESP32 has no
+# built-in USB-JTAG, so an external probe is required). `xtensa-semihosting`
+# selects the OpenOCD semihosting backend used to report results to the host.
+[dev-dependencies]
+embedded-test = { version = "0.7.1", default-features = false, features = [
+  "xtensa-semihosting",
+  "panic-handler",
+  "log",
+] }
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1     # LLVM can perform better optimizations using a single thread
+debug         = 2     # prefer slower builds but better debugging experience
+lto           = 'fat'
+opt-level     = 's'
