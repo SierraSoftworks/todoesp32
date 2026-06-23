@@ -15,9 +15,8 @@ use epd_waveshare::color::OctColor;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::rng::Rng;
-use esp_hal::rtc_cntl::sleep::TimerWakeupSource;
-use esp_hal::rtc_cntl::{Rtc, wakeup_cause};
-use esp_hal::system::SleepSource;
+use esp_hal::rtc_cntl::Rtc;
+use esp_hal::rtc_cntl::sleep::{RtcSleepConfig, TimerWakeupSource};
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info, warn};
 
@@ -60,11 +59,20 @@ const WIFI_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for an NTP time sync before giving up.
 const SNTP_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Fingerprint of whatever is currently shown on the panel, kept in RTC memory
-/// so it survives deep sleep. We only refresh the (slow, power-hungry) e-paper
-/// when the content we want to show differs from this value.
+/// Marks [`DISPLAY_FINGERPRINT`] as valid. RTC memory holds undefined contents
+/// after a cold boot, so the stored fingerprint is only trusted when the
+/// companion marker matches this value.
+const FINGERPRINT_MAGIC: u32 = 0x7d0e_5f01;
+
+/// Fingerprint of whatever is currently shown on the panel, kept in RTC fast
+/// memory so it survives deep sleep (note: [`enter_deep_sleep`] must keep that
+/// memory domain powered). We only refresh the slow, power-hungry e-paper when
+/// the content we want to show differs from this value.
 #[esp_hal::ram(unstable(rtc_fast, persistent))]
 static mut DISPLAY_FINGERPRINT: u64 = 0;
+/// Validity marker for [`DISPLAY_FINGERPRINT`]; see [`FINGERPRINT_MAGIC`].
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut DISPLAY_FINGERPRINT_VALID: u32 = 0;
 
 /// The kind of problem that prevented a normal refresh. Each renders a distinct
 /// status screen and is fingerprinted, so a persistent failure is only drawn
@@ -96,10 +104,10 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
     info!("Embassy + esp-rtos initialised");
 
-    // The RTC fingerprint only describes the panel contents if we woke from one
-    // of our own timed deep-sleep refreshes. After a cold boot or a panic reset
-    // we force a redraw so the panel reflects reality.
-    let resumed = matches!(wakeup_cause(), SleepSource::Timer);
+    // The fingerprint of what is currently on the panel, if it survived from a
+    // previous cycle. `None` after a cold boot (RTC memory is uninitialised) or
+    // if the fingerprint could not be retained.
+    let shown = load_fingerprint();
 
     let mut rng = Rng::new();
 
@@ -129,40 +137,43 @@ async fn main(spawner: Spawner) -> ! {
 
     // Run a single refresh cycle, render only if the result changed, then sleep.
     // Deep sleep resets the chip, so the next wake starts this function over.
-    let (fingerprint, sleep_for) =
-        match run_refresh(spawner, &mut rng, peripherals.WIFI, offset).await {
-            Ok((now, snapshots)) => {
-                let date = now.date_naive();
-                let fingerprint = fingerprint_tasks(date, &snapshots);
-                if !resumed || load_fingerprint() != fingerprint {
-                    info!("Task content changed; refreshing the panel");
-                    header.set_date(date);
-                    header.set_last_update(
-                        alloc::format!("Updated {:02}:{:02}", now.hour(), now.minute()),
-                        OctColor::Green,
-                    );
-                    tasks.set_tasks(snapshots);
-                    if let Err(e) = display
-                        .render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])
-                    {
-                        error!("Failed to render task list: {e:?}");
-                    }
-                } else {
-                    info!("Tasks unchanged since the last refresh; leaving the panel as-is");
+    let (fingerprint, sleep_for) = match run_refresh(spawner, &mut rng, peripherals.WIFI, offset)
+        .await
+    {
+        Ok((now, snapshots)) => {
+            let date = now.date_naive();
+            let fingerprint = fingerprint_tasks(date, &snapshots);
+            if shown == Some(fingerprint) {
+                info!("Tasks unchanged (fingerprint {fingerprint:#018x}); leaving the panel as-is");
+            } else {
+                info!(
+                    "Task content changed (was {shown:?}, now {fingerprint:#018x}); refreshing the panel"
+                );
+                header.set_date(date);
+                header.set_last_update(
+                    alloc::format!("Updated {:02}:{:02}", now.hour(), now.minute()),
+                    OctColor::Green,
+                );
+                tasks.set_tasks(snapshots);
+                if let Err(e) = display
+                    .render_controls_if_dirty(OctColor::White, &mut [&mut header, &mut tasks])
+                {
+                    error!("Failed to render task list: {e:?}");
                 }
-                (fingerprint, REFRESH_INTERVAL)
             }
-            Err(failure) => {
-                let fingerprint = fingerprint_status(failure as u8);
-                if !resumed || load_fingerprint() != fingerprint {
-                    warn!("Refresh failed ({failure:?}); showing the status screen");
-                    render_status(&mut display, &mut header, &mut tasks, failure, offset);
-                } else {
-                    warn!("Refresh still failing ({failure:?}); status screen already shown");
-                }
-                (fingerprint, RETRY_INTERVAL)
+            (fingerprint, REFRESH_INTERVAL)
+        }
+        Err(failure) => {
+            let fingerprint = fingerprint_status(failure as u8);
+            if shown == Some(fingerprint) {
+                warn!("Refresh still failing ({failure:?}); status screen already shown");
+            } else {
+                warn!("Refresh failed ({failure:?}); showing the status screen");
+                render_status(&mut display, &mut header, &mut tasks, failure, offset);
             }
-        };
+            (fingerprint, RETRY_INTERVAL)
+        }
+    };
 
     store_fingerprint(fingerprint);
 
@@ -302,24 +313,43 @@ fn render_status(
     }
 }
 
-/// Read the panel fingerprint persisted across deep sleep.
-fn load_fingerprint() -> u64 {
+/// Read the panel fingerprint persisted across deep sleep, or `None` if RTC
+/// memory does not currently hold a valid value (e.g. after a cold boot).
+fn load_fingerprint() -> Option<u64> {
     // SAFETY: single-threaded access to RTC-persistent memory.
-    unsafe { (&raw const DISPLAY_FINGERPRINT).read() }
+    unsafe {
+        if (&raw const DISPLAY_FINGERPRINT_VALID).read() == FINGERPRINT_MAGIC {
+            Some((&raw const DISPLAY_FINGERPRINT).read())
+        } else {
+            None
+        }
+    }
 }
 
-/// Persist the panel fingerprint across deep sleep.
+/// Persist the panel fingerprint (and its validity marker) across deep sleep.
 fn store_fingerprint(value: u64) {
     // SAFETY: single-threaded access to RTC-persistent memory.
-    unsafe { (&raw mut DISPLAY_FINGERPRINT).write(value) }
+    unsafe {
+        (&raw mut DISPLAY_FINGERPRINT).write(value);
+        (&raw mut DISPLAY_FINGERPRINT_VALID).write(FINGERPRINT_MAGIC);
+    }
 }
 
 /// Enter timer-wake deep sleep. The chip resets on wake and `main` runs again.
+///
+/// Unlike [`Rtc::sleep_deep`], this keeps the RTC fast-memory domain powered so
+/// the persistent [`DISPLAY_FINGERPRINT`] actually survives the sleep — the
+/// default deep-sleep config powers that memory down, which would erase the
+/// fingerprint and force a full refresh on every wake.
 fn enter_deep_sleep(duration: Duration, lpwr: esp_hal::peripherals::LPWR<'static>) -> ! {
     info!("Entering deep sleep for {} s", duration.as_secs());
+    let mut config = RtcSleepConfig::deep();
+    config.set_rtc_fastmem_pd_en(false);
+
     let mut rtc = Rtc::new(lpwr);
     let wake = TimerWakeupSource::new(core::time::Duration::from_secs(duration.as_secs()));
-    rtc.sleep_deep(&[&wake])
+    rtc.sleep(&config, &[&wake]);
+    unreachable!("deep sleep resets the chip and never returns");
 }
 
 /// Produce a 64-bit seed from the hardware RNG.
