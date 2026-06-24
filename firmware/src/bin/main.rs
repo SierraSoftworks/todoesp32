@@ -27,6 +27,7 @@ use todoesp_core::{
 
 use todoesp32_firmware::controls::{Header, TaskList};
 use todoesp32_firmware::display::EpdDisplay;
+use todoesp32_firmware::retry::retry;
 use todoesp32_firmware::todoist::{ClientState, TodoistClient};
 use todoesp32_firmware::{config, net};
 
@@ -56,8 +57,10 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 const RETRY_INTERVAL: Duration = Duration::from_secs(60);
 /// How long to wait for the WiFi link (association + DHCP) before giving up.
 const WIFI_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long to wait for an NTP time sync before giving up.
+/// How long to wait for a single NTP time sync attempt before giving up.
 const SNTP_TIMEOUT: Duration = Duration::from_secs(15);
+/// How many additional NTP sync attempts to make after the first failure.
+const SNTP_RETRIES: usize = 3;
 
 /// Marks [`DISPLAY_FINGERPRINT`] as valid. RTC memory holds undefined contents
 /// after a cold boot, so the stored fingerprint is only trusted when the
@@ -228,22 +231,25 @@ async fn run_refresh(
     }
 
     let boot = Instant::now();
-    let base_unix = match with_timeout(
-        SNTP_TIMEOUT,
-        todoesp32_firmware::sntp::sync_unix_time(stack, config::NTP_SERVER),
+    let base_unix = retry(
+        || async {
+            match with_timeout(
+                SNTP_TIMEOUT,
+                todoesp32_firmware::sntp::sync_unix_time(stack, config::NTP_SERVER),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(todoesp32_firmware::sntp::SntpError::Timeout),
+            }
+        },
+        SNTP_RETRIES,
     )
     .await
-    {
-        Ok(Ok(unix)) => unix,
-        Ok(Err(e)) => {
-            warn!("Failed to synchronise time over NTP: {e:?}");
-            return Err(Failure::Time);
-        }
-        Err(_) => {
-            warn!("Timed out synchronising time over NTP");
-            return Err(Failure::Time);
-        }
-    };
+    .map_err(|e| {
+        warn!("Failed to synchronise time over NTP: {e:?}");
+        Failure::Time
+    })?;
     info!("System time synchronised via NTP");
 
     // Heap-leaked for this cycle; the deep-sleep reset reclaims everything.
