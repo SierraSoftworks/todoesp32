@@ -2,7 +2,10 @@
 
 use embassy_net::Runner;
 use embassy_time::{Duration, Timer};
-use esp_radio::wifi::{Config as WifiConfig, Interface, WifiController, sta::StationConfig};
+use esp_radio::wifi::{
+    Config as WifiConfig, Interface, WifiController,
+    sta::{ScanMethod, StationConfig},
+};
 use log::{info, warn};
 
 /// The embassy-net `Driver` provided by the WiFi station interface.
@@ -23,10 +26,18 @@ pub async fn connection(
             Timer::after(Duration::from_secs(5)).await;
         }
 
+        // Scan every channel (rather than the default fast scan, which stops at the
+        // first matching AP) so the radio can compare every AP broadcasting the SSID.
+        // esp-radio sorts candidates by signal strength, so this connects us to the
+        // AP with the best RSSI instead of whichever one happened to answer first.
+        // `failure_retry_cnt` only takes effect with an all-channel scan and lets the
+        // radio fall back to the next-best AP if the strongest one refuses us.
         let client_config = WifiConfig::Station(
             StationConfig::default()
                 .with_ssid(ssid)
-                .with_password(password.into()),
+                .with_password(password.into())
+                .with_scan_method(ScanMethod::AllChannels)
+                .with_failure_retry_cnt(3),
         );
         if let Err(e) = controller.set_config(&client_config) {
             warn!("Failed to set WiFi configuration: {e:?}");
